@@ -1,0 +1,132 @@
+#!/bin/sh
+
+PROGRAM='git conventional commit'
+VERSION=0.1.0
+
+die() {
+	echo "${PROGRAM}: $1" 1>&2
+	exit 1
+}
+
+die_if_missing_type() {
+	[ -n "$1" ] || die 'missing commit type'
+}
+
+die_if_missing_colon() {
+	[ "$1" = ':' ] || die "missing ':' separator"
+}
+
+cmd_conventional_commit() {
+	args="$(getopt --name "${PROGRAM}" \
+		--options basvu:c:C:eioS: \
+		--longoptions breaking \
+		--longoptions interactive,patch,amend,dry-run,squash:,fixup:,reset-author \
+		--longoptions allow-empty,allow-empty-message,no-verify,author:,date:,cleanup: \
+		--longoptions status,no-status,pathspec-from-file:,pathspec-file-nul,trailer: \
+		-- "$@")" || exit 1
+
+	eval set -- "${args}"
+
+	while :; do case "$1" in
+		-b|--breaking)
+			bang=!
+			shift
+		;;
+		-u|-c|-C|-S|--squash|--fixup|--author|--date|--cleanup|--pathspec-from-file|--trailer)
+			value="$(
+				sed "s/'/'\\\\''/g;1s/^/'/;\$s/\$/'/" <<- EOF
+					$2
+				EOF
+			)"
+			options="${options} ${1} ${value}"
+			shift 2
+		;;
+		--)
+			shift && break
+		;;
+		*)
+			options="${options} ${1}"
+			shift
+		;;
+	esac done
+
+	type="${0##*/git-}"
+	if [ "${type}" = conventional-commit ]; then
+		type="$1"
+		die_if_missing_type "${type}"
+		shift
+	fi
+
+	case "${type}" in
+		*!:)
+			type="${type%!:}"
+			bang='!'
+		;;
+		*:)
+			type="${type%:}"
+		;;
+		*!)
+			type="${type%!}"
+			bang='!'
+			case "$*" in
+				*:*) scan_scopes=yes ;;
+			esac
+		;;
+		*)
+			case "$*" in
+				*:*) scan_scopes=yes ;;
+			esac
+		;;
+	esac
+
+	die_if_missing_type "${type}"
+
+	if [ "${scan_scopes}" = yes ]; then
+		scope_delim='('
+		while :; do
+			case "$1" in
+				:)
+					shift && break
+				;;
+				!)
+					die_if_missing_colon "$2"
+					bang='!'
+					shift 2 && break
+				;;
+				*!:)
+					scopes="${scopes}${scope_delim}${1%!:}"
+					bang='!'
+					shift && break
+				;;
+				*:)
+					scopes="${scopes}${scope_delim}${1%:}"
+					shift && break
+				;;
+				*!)
+					die_if_missing_colon "$2"
+					scopes="${scopes}${scope_delim}${1%!}"
+					bang='!'
+					shift 2 && break
+				;;
+				*)
+					scopes="${scopes}${scope_delim}${1}"
+					shift
+				;;
+			esac
+			scope_delim=','
+		done
+		scopes="${scopes:+${scopes})}"
+	fi
+
+	eval "git commit ${options} --message=\"\${type}\${scopes}\${bang}:\${*:+ \$*}\""
+}
+
+cmd_print_version() {
+	[ $# -eq 0 ] || die "extra argument: '$1'"
+	printf 'git-conventional-commit version %s\n' "${VERSION}"
+}
+
+case "$1" in
+	--version|-v) shift; cmd_print_version "$@" ;;
+	*) cmd_conventional_commit "$@" ;;
+esac
