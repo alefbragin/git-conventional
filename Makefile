@@ -5,8 +5,8 @@ PREFIX_BIN = $(PREFIX)/bin
 BINARY = git-conventional-commit
 INSTALL_BINARY_PATH = $(PREFIX_BIN)/$(BINARY)
 
-LINKS_STEM = $(addprefix $(PREFIX_BIN)/git-, $(TYPES))
-LINKS := $(foreach SUFFIX, '' \: ! !\:, $(addsuffix $(SUFFIX), $(LINKS_STEM)))
+LINKS := $(addprefix $(PREFIX_BIN)/git-, $(TYPES))
+LINKS += $(foreach SUFFIX, \: ! !\:, $(addsuffix $(SUFFIX), $(LINKS)))
 
 .PHONY: all install install-binary install-links uninstall uninstall-binary uninstall-links
 
