@@ -1,11 +1,12 @@
 #!/bin/sh
 
 PROGRAM='git conventional commit'
-VERSION=0.1.1
+VERSION=0.1.2
 
 ERROR_MISSING_TYPE='missing commit type'
 ERROR_MISSING_COLON="missing ':' separator"
 ERROR_UNAVAILABLE_TYPE="unavailable commit type: '%s'"
+ERROR_UNAVAILABLE_SCOPE="unavailable commit scope: '%s'"
 ERROR_CANNOT_GET_CONFIG='cannot get git config'
 
 die() {
@@ -13,15 +14,42 @@ die() {
 	exit 1
 }
 
+process_scope() {
+	if [ -z "${config_scopes}" ]; then
+		config_scopes="$(git config --get convention.scopes)" || die "${ERROR_CANNOT_GET_CONFIG}"
+		for config_scope in ${config_scopes}; do
+			eval "config_scopes_${config_scope}=1"
+		done
+	fi
+
+	eval "[ \"\${config_scopes_${1}}\" = 1 ]" || die "${ERROR_UNAVAILABLE_SCOPE}" "$1"
+
+	if [ "${sort_scopes}" = no ] && eval "[ \"\${scopes_${1}}\" != 1 ]"; then
+		scopes="${scopes}${1} "
+	fi
+
+	eval "scopes_${1}=1"
+}
+
+format_scopes() {
+	if [ $# -gt 0 ]; then
+		formated_scopes="($1" && shift
+		for scope; do
+			formated_scopes="${formated_scopes},${scope}"
+		done
+		formated_scopes="${formated_scopes})"
+	fi
+}
+
 cmd_conventional_commit() {
 	config_types="$(git config --get convention.types)" || die "${ERROR_CANNOT_GET_CONFIG}"
 	for config_type in ${config_types}; do
-		eval "types_${config_type}=1"
+		eval "config_types_${config_type}=1"
 	done
 
 	args="$(getopt --name "${PROGRAM}" \
 		--options basvu:c:C:eioS: \
-		--longoptions breaking \
+		--longoptions breaking,no-sort-scopes \
 		--longoptions interactive,patch,amend,dry-run,squash:,fixup:,reset-author \
 		--longoptions allow-empty,allow-empty-message,no-verify,author:,date:,cleanup: \
 		--longoptions status,no-status,pathspec-from-file:,pathspec-file-nul,trailer: \
@@ -32,6 +60,10 @@ cmd_conventional_commit() {
 	while :; do case "$1" in
 		-b|--breaking)
 			bang=!
+			shift
+		;;
+		--no-sort-scopes)
+			sort_scopes=no
 			shift
 		;;
 		-u|-c|-C|-S|--squash|--fixup|--author|--date|--cleanup|--pathspec-from-file|--trailer)
@@ -59,6 +91,9 @@ cmd_conventional_commit() {
 	fi
 
 	case "${type}" in
+		''|:|!|!:)
+			die "${ERROR_MISSING_TYPE}"
+		;;
 		*!:)
 			type="${type%!:}"
 			bang='!'
@@ -80,47 +115,53 @@ cmd_conventional_commit() {
 		;;
 	esac
 
-	[ -n "$1" ] || die "${ERROR_MISSING_TYPE}"
-	eval "[ \"\${types_${type}}\" = 1 ]" || die "${ERROR_UNAVAILABLE_TYPE}" "${type}"
+	eval "[ \"\${config_types_${type}}\" = 1 ]" || die "${ERROR_UNAVAILABLE_TYPE}" "${type}"
 
 	if [ "${scan_scopes}" = yes ]; then
-		scope_delim='('
-		while :; do
-			case "$1" in
-				:)
-					shift && break
-				;;
-				!)
-					[ "$2" = ':' ] || die "${ERROR_MISSING_COLON}"
-					bang='!'
-					shift 2 && break
-				;;
-				*!:)
-					scopes="${scopes}${scope_delim}${1%!:}"
-					bang='!'
-					shift && break
-				;;
-				*:)
-					scopes="${scopes}${scope_delim}${1%:}"
-					shift && break
-				;;
-				*!)
-					[ "$2" = ':' ] || die "${ERROR_MISSING_COLON}"
-					scopes="${scopes}${scope_delim}${1%!}"
-					bang='!'
-					shift 2 && break
-				;;
-				*)
-					scopes="${scopes}${scope_delim}${1}"
-					shift
-				;;
-			esac
-			scope_delim=','
-		done
-		scopes="${scopes:+${scopes})}"
+		while :; do case "$1" in
+			!:)
+				bang='!'
+				shift && break
+			;;
+			:)
+				shift && break
+			;;
+			!)
+				[ "$2" = ':' ] || die "${ERROR_MISSING_COLON}"
+				bang='!'
+				shift 2 && break
+			;;
+			*!:)
+				process_scope "${1%!:}"
+				bang='!'
+				shift && break
+			;;
+			*:)
+				process_scope "${1%:}"
+				shift && break
+			;;
+			*!)
+				[ "$2" = ':' ] || die "${ERROR_MISSING_COLON}"
+				process_scope "${1%!}"
+				bang='!'
+				shift 2 && break
+			;;
+			*)
+				process_scope "$1"
+				shift
+			;;
+		esac done
 	fi
 
-	eval "git commit ${options} --message=\"\${type}\${scopes}\${bang}:\${*:+ \$*}\""
+	if [ "${sort_scopes}" != no ]; then
+		for scope in ${config_scopes}; do if eval "[ \"\${scopes_${scope}}\" = 1 ]"; then
+			scopes="${scopes}${scope} "
+		fi done
+	fi
+
+	format_scopes ${scopes}
+
+	eval "git commit ${options} --message=\"\${type}\${formated_scopes}\${bang}:\${*:+ \$*}\""
 }
 
 cmd_print_version() {

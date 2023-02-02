@@ -1,6 +1,7 @@
 PREFIX ?= /usr/local
 GIT_CONFIG_SCOPE ?= system
 TYPES ?= build chore ci docs feat fix ops perf refactor style test wip
+SCOPES ?= backend frontend
 
 PREFIX_BIN = $(PREFIX)/bin
 CONFIG_SECTION = convention
@@ -26,9 +27,11 @@ uninstall-binary:
 
 config:
 	git config --$(GIT_CONFIG_SCOPE) $(CONFIG_SECTION).types '$(TYPES)'
+	git config --$(GIT_CONFIG_SCOPE) $(CONFIG_SECTION).scopes '$(SCOPES)'
 
 unconfig:
 	git config --$(GIT_CONFIG_SCOPE) --unset-all $(CONFIG_SECTION).types
+	git config --$(GIT_CONFIG_SCOPE) --unset-all $(CONFIG_SECTION).scopes
 
 install-links: $(LINKS)
 
