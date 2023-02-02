@@ -1,22 +1,24 @@
 #!/bin/sh
 
 PROGRAM='git conventional commit'
-VERSION=0.1.0
+VERSION=0.1.1
+
+ERROR_MISSING_TYPE='missing commit type'
+ERROR_MISSING_COLON="missing ':' separator"
+ERROR_UNAVAILABLE_TYPE="unavailable commit type: '%s'"
+ERROR_CANNOT_GET_CONFIG='cannot get git config'
 
 die() {
-	echo "${PROGRAM}: $1" 1>&2
+	printf "${PROGRAM}: $1\n" "$2" 1>&2
 	exit 1
 }
 
-die_if_missing_type() {
-	[ -n "$1" ] || die 'missing commit type'
-}
-
-die_if_missing_colon() {
-	[ "$1" = ':' ] || die "missing ':' separator"
-}
-
 cmd_conventional_commit() {
+	config_types="$(git config --get convention.types)" || die "${ERROR_CANNOT_GET_CONFIG}"
+	for config_type in ${config_types}; do
+		eval "types_${config_type}=1"
+	done
+
 	args="$(getopt --name "${PROGRAM}" \
 		--options basvu:c:C:eioS: \
 		--longoptions breaking \
@@ -53,8 +55,7 @@ cmd_conventional_commit() {
 	type="${0##*/git-}"
 	if [ "${type}" = conventional-commit ]; then
 		type="$1"
-		die_if_missing_type "${type}"
-		shift
+		shift 2> /dev/null || die "${ERROR_MISSING_TYPE}"
 	fi
 
 	case "${type}" in
@@ -79,7 +80,8 @@ cmd_conventional_commit() {
 		;;
 	esac
 
-	die_if_missing_type "${type}"
+	[ -n "$1" ] || die "${ERROR_MISSING_TYPE}"
+	eval "[ \"\${types_${type}}\" = 1 ]" || die "${ERROR_UNAVAILABLE_TYPE}" "${type}"
 
 	if [ "${scan_scopes}" = yes ]; then
 		scope_delim='('
@@ -89,7 +91,7 @@ cmd_conventional_commit() {
 					shift && break
 				;;
 				!)
-					die_if_missing_colon "$2"
+					[ "$2" = ':' ] || die "${ERROR_MISSING_COLON}"
 					bang='!'
 					shift 2 && break
 				;;
@@ -103,7 +105,7 @@ cmd_conventional_commit() {
 					shift && break
 				;;
 				*!)
-					die_if_missing_colon "$2"
+					[ "$2" = ':' ] || die "${ERROR_MISSING_COLON}"
 					scopes="${scopes}${scope_delim}${1%!}"
 					bang='!'
 					shift 2 && break
