@@ -3,27 +3,49 @@ GIT_CONFIG_SCOPE ?= system
 TYPES ?= build chore ci docs feat fix ops perf refactor style test wip
 SCOPES ?= backend frontend
 
-PREFIX_BIN = $(PREFIX)/bin
 CONFIG_SECTION = convention
+
+BUILD_DIR=build
+INSTALL_DIR=$(PREFIX)/bin
 BINARY = git-conventional-commit
-INSTALL_BINARY_PATH = $(PREFIX_BIN)/$(BINARY)
+BINARY_INSTALL_PATH = $(INSTALL_DIR)/$(BINARY)
+BINARY_BUILD_PATH = $(BUILD_DIR)/$(BINARY)
 
-LINKS := $(addprefix $(PREFIX_BIN)/git-, $(TYPES))
-LINKS += $(foreach SUFFIX, \: ! !\:, $(addsuffix $(SUFFIX), $(LINKS)))
+LINKS_NAMES := $(addprefix git-, $(TYPES))
+LINKS_NAMES += $(foreach SUFFIX, \: ! !\:, $(addsuffix $(SUFFIX), $(LINKS_NAMES)))
+LINKS_BUILD_PATHS := $(addprefix $(BUILD_DIR)/, $(LINKS_NAMES))
+LINKS_INSTALL_PATHS := $(addprefix $(INSTALL_DIR)/, $(LINKS_NAMES))
 
-.PHONY: all install uninstall install-binary uninstall-binary config unconfig install-links uninstall-links
+.PHONY: all clean \
+	install uninstall \
+	install-binary uninstall-binary \
+	config unconfig \
+	install-links uninstall-links $(LINKS_INSTALL_PATHS) \
+	test
 
-all:
+all: $(BINARY_BUILD_PATH) $(LINKS_BUILD_PATHS)
+
+$(BUILD_DIR):
+	mkdir $(BUILD_DIR)
+
+$(BINARY_BUILD_PATH): $(BINARY) | $(BUILD_DIR)
+	cp $(BINARY) $(BINARY_BUILD_PATH)
+
+$(LINKS_BUILD_PATHS): | $(BUILD_DIR)
+	ln --symbolic $(BINARY) $@
+
+clean:
+	rm -rf $(BUILD_DIR)
 
 install: install-binary config install-links
 
 uninstall: uninstall-binary unconfig uninstall-links
 
 install-binary:
-	install -D --mode=755 $(BINARY) $(INSTALL_BINARY_PATH)
+	install -D --mode=755 $(BINARY_BUILD_PATH) $(BINARY_INSTALL_PATH)
 
 uninstall-binary:
-	rm $(INSTALL_BINARY_PATH)
+	rm $(BINARY_INSTALL_PATH)
 
 config:
 	git config --$(GIT_CONFIG_SCOPE) $(CONFIG_SECTION).types '$(TYPES)'
@@ -33,12 +55,12 @@ unconfig:
 	git config --$(GIT_CONFIG_SCOPE) --unset-all $(CONFIG_SECTION).types
 	git config --$(GIT_CONFIG_SCOPE) --unset-all $(CONFIG_SECTION).scopes
 
-install-links: $(LINKS)
+install-links: $(LINKS_INSTALL_PATHS)
 
-$(LINKS):
-	ln -s $(INSTALL_BINARY_PATH) $@
+$(LINKS_INSTALL_PATHS):
+	cp --no-dereference $(@:$(INSTALL_DIR)/%=$(BUILD_DIR)/%) $@
 
 uninstall-links:
-	rm $(LINKS)
+	rm $(LINKS_INSTALL_PATHS)
 
 uninstall: uninstall-binary unconfig uninstall-links
