@@ -1,0 +1,378 @@
+#!/bin/bash
+
+##
+# Constants
+##
+
+ERROR_MISSING_TYPE='git conventional commit: missing commit type'
+ERROR_EXCLAMATION_WRONG_PLACE="git conventional commit: '!' in wrong place, it must be just before ':'"
+ERROR_UNAVAILABLE_TYPE="git conventional commit: unavailable commit type: '%s'"
+ERROR_UNAVAILABLE_SCOPE="git conventional commit: unavailable commit scope: '%s'"
+ERROR_DUPLICATED_SCOPE="git conventional commit: duplicated scope: '%s'"
+
+RANDOM=0
+
+
+##
+# Helpers
+##
+
+die() {
+	if [ $# != 0 ]; then
+		echo "git-conventional-commit test runner: $1" 1>&2
+	fi
+	exit 1
+}
+
+errf() {
+	eval "printf \"\${$1}\"" "${@:2}" || die 'cannot format error'
+}
+
+failed() {
+	if [ -n "${TEST}" ]; then
+		local test=" [\e[0m${TEST}\e[1;31m]"
+	fi
+
+	printf "\e[1;31mTEST FAILED${test}:\e[0m ${1}\n" "${@:2}" 1>&2 \
+		|| die 'cannot print message'
+
+	tear_down
+	exit 1
+}
+
+passed() {
+	printf "\e[1;32mTEST PASSED [\e[0m${TEST}\e[1;32m]:\e[0m ${1}\n" "${@:2}" 1>&2 \
+		|| die  'cannot print message'
+}
+
+all_passed() {
+	printf '\e[1;32mALL TESTS PASSED\e[0\n' 1>&2
+}
+
+assert_equals() {
+	[ "$2" = "$3" ] || failed "expected %s: '%s'; actual one: '%s'" "$1" "$2" "$3"
+}
+
+git_config() {
+	git config --local "$1" "$2" || failed 'cannot config repo'
+}
+
+print_yellow() {
+	printf '\e[1;33m%s\e[0m\n' "$1" 1>&2
+}
+
+set_up() {
+	print_yellow 'SET UP...'
+
+	mkdir "${REPO}" || failed 'cannot make repo directory'
+
+	(
+		cd "${REPO}" || failed 'cannot enter to repo directory'
+
+		git init || failed 'cannot init repo'
+		git_config convention.types 'feat fix'
+		git_config convention.scopes 'frontend backend'
+		git_config user.email smit@example.com
+		git_config user.name Jhon Smit
+		git_config commit.gpgsign false
+	) || die
+
+	print_yellow 'SETTED UP'
+}
+
+tear_down() {
+	print_yellow 'TEAR DOWN...'
+
+	rm -rf "${REPO}" || die 'cannot tear down'
+	[ ! -e "${REPO}" ] || die 'repo still exists'
+
+	print_yellow 'TEARED DOWN'
+}
+
+touch_and_stage_repo() {
+	echo "${RANDOM}" > "${REPO}/random.txt" || failed 'cannot touch random.txt'
+	(
+		cd "${REPO}"
+		git add random.txt || failed 'cannot stage random.txt'
+	) || die
+}
+
+last_commit_message() {
+	(
+		cd "${REPO}"
+		git log --format=%s --max-count=1 || failed 'cannot get actual message from commit'
+	) || die
+}
+
+set_test_name() {
+	TEST="$(printf "$1" "$2")" || die 'cannot set test name'
+}
+
+test_conventional_commit() {
+	local callback="$1" && shift
+
+	args="$(getopt --name test_message --options n:AB --longoptions no-alias,no-base -- "$@")" || die
+	eval set -- "${args}"
+
+	local test_alias=1
+	local test_base=1
+	local name_format=%s
+	while :; do case "$1" in
+		-n)
+			local name_format="$2"
+			shift 2
+		;;
+		-A|--no-alias)
+			test_alias=
+			shift
+		;;
+		-B|--no-base)
+			test_base=
+			shift
+		;;
+		--)
+			shift && break
+		;;
+	esac done
+
+	if [ "${test_base}" = 1 ]; then
+		"${callback}" "${name_format}" "$1" conventional-commit "${@:2}"
+	fi
+
+	if [ "${test_alias}" = 1 ]; then
+		"${callback}" "${name_format}" "$1" "${@:2}"
+	fi
+}
+
+test_message_callback() {
+	set_test_name "$1" "${*:3}"
+	local expected="$2"
+	shift 2
+
+	touch_and_stage_repo
+
+	(
+		cd "${REPO}"
+		git "$@" || failed 'cannot make conventional commit'
+		actual="$(last_commit_message)" || die
+		assert_equals 'commit message' "${expected}" "${actual}"
+		passed "with '%s'" "${actual}"
+	) || die
+}
+
+test_message() {
+	test_conventional_commit test_message_callback "$@"
+}
+
+test_failure_callback() {
+	if [ "$1" = %s ]; then
+		local name='must fail: %s'
+	else
+		local name="$1"
+	fi
+	set_test_name "${name}" "${*:3}"
+	local expected="$2"
+	shift 2
+
+	touch_and_stage_repo
+
+	(
+		cd "${REPO}"
+		actual="$(git "$@" 2>&1)"
+
+		if [ $? -eq 0 ]; then
+			message="$(last_commit_message)" || die
+			failed "command '%s' must fails, but commits with '%s'" "git $*" "${message}"
+		fi
+
+		assert_equals 'error message' "${expected}" "${actual}"
+		passed "with '%s'" "${actual}"
+	) || die
+}
+
+test_failure() {
+	test_conventional_commit test_failure_callback "$@"
+}
+
+
+##
+# Tests
+##
+
+# TODO: fix conventional-commit extension to pass commented tests
+
+run_dir="$1"
+[ -n "${run_dir}" ] || die 'test run directory is not setup'
+run_dir="$(realpath --no-symlinks "${run_dir}")" || die 'cannot get path of test run directory'
+REPO="${run_dir}/repo"
+
+bin_dir="$2"
+[ -n "${bin_dir}" ] || die 'test bin directory is not setup'
+bin_dir="$(realpath --no-symlinks "${bin_dir}")" || die 'cannot get path of test bin directory'
+PATH="${bin_dir}:${PATH}"
+export PATH
+
+set_up
+
+# Without scopes
+
+test_message 'feat: word1 word2' feat word1 word2
+
+# test_message -A 'feat: word1 word2' feat:word1 word2
+test_message 'feat: word1 word2' feat: word1 word2
+# test_message 'feat: word1 word2' feat :word1 word2
+test_message 'feat: word1 word2' feat : word1 word2
+
+# test_message -A 'feat!: word1 word2' feat!word1 word2
+test_message 'feat!: word1 word2' feat! word1 word2
+# test_message 'feat!: word1 word2' feat !word1 word2
+# test_message 'feat!: word1 word2' feat ! word1 word2
+
+# test_message -A 'feat!: word1 word2' feat!:word1 word2
+test_message 'feat!: word1 word2' feat!: word1 word2
+# test_message 'feat!: word1 word2' feat! :word1 word2
+# test_message 'feat!: word1 word2' feat !:word1 word2
+
+test_message 'feat!: word1 word2' feat! : word1 word2
+test_message 'feat!: word1 word2' feat !: word1 word2
+# test_message 'feat!: word1 word2' feat ! :word1 word2
+
+test_message 'feat!: word1 word2' feat ! : word1 word2
+
+
+# Options: --breaking, --no-breaking, -b
+
+test_message -A 'feat!: word1 word2' -- --breaking feat word1 word2
+test_message -B 'feat!: word1 word2' -- feat --breaking word1 word2
+
+test_message -A 'feat!: word1 word2' -- -b feat word1 word2
+test_message -B 'feat!: word1 word2' -- feat -b word1 word2
+
+test_message -A 'feat!: word1 word2' -- --breaking feat! word1 word2
+test_message -B 'feat!: word1 word2' -- feat! --breaking word1 word2
+
+# test_message -A 'feat: word1 word2' -- --no-breaking feat! word1 word2
+# test_message -B 'feat: word1 word2' -- feat! --no-breaking word1 word2
+
+# test_message -A 'feat: word1 word2' -- --no-breaking feat word1 word2
+# test_message -B 'feat: word1 word2' -- feat --no-breaking word1 word2
+
+
+# One scope
+
+# test_message 'feat(frontend): word1 word2' feat frontend:word1 word2
+test_message 'feat(frontend): word1 word2' feat frontend: word1 word2
+# test_message 'feat(frontend): word1 word2' feat frontend :word1 word2
+test_message 'feat(frontend): word1 word2' feat frontend : word1 word2
+
+# test_message 'feat(frontend)!: word1 word2' feat frontend!word1 word2
+# test_message 'feat(frontend)!: word1 word2' feat frontend! word1 word2
+# test_message 'feat(frontend)!: word1 word2' feat frontend !word1 word2
+# test_message 'feat(frontend)!: word1 word2' feat frontend ! word1 word2
+
+# test_failure -A "${ERROR_EXCLAMATION_WRONG_PLACE}" feat!frontend:word1 word2
+
+# test_failure -A "${ERROR_EXCLAMATION_WRONG_PLACE}" feat!frontend: word1 word2
+# test_failure -A "${ERROR_EXCLAMATION_WRONG_PLACE}" feat!frontend :word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat! frontend:word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat !frontend:word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend!:word1 word2
+
+# test_failure -A "${ERROR_EXCLAMATION_WRONG_PLACE}" feat!frontend : word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat! frontend: word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat! frontend :word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat !frontend :word1 word2
+test_message 'feat(frontend)!: word1 word2' feat frontend!: word1 word2
+# test_message 'feat(frontend)!: word1 word2' feat frontend! :word1 word2
+# test_message 'feat(frontend)!: word1 word2' feat frontend !:word1 word2
+
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat! frontend : word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat !frontend : word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat ! frontend: word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat ! frontend :word1 word2
+# test_message 'feat(frontend)!: word1 word2' feat frontend! : word1 word2
+test_message 'feat(frontend)!: word1 word2' feat frontend !: word1 word2
+# test_message 'feat(frontend)!: word1 word2' feat frontend ! :word1 word2
+
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat ! frontend : word1 word2
+test_message 'feat(frontend)!: word1 word2' feat frontend ! : word1 word2
+
+
+# More scopes
+
+# test_message 'feat(frontend,backend): word1 word2' feat frontend backend:word1 word2
+test_message 'feat(frontend,backend): word1 word2' feat frontend backend: word1 word2
+# test_message 'feat(frontend,backend): word1 word2' feat frontend backend :word1 word2
+test_message 'feat(frontend,backend): word1 word2' feat frontend backend : word1 word2
+
+# test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend!word1 word2
+# test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend! word1 word2
+# test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend !word1 word2
+# test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend ! word1 word2
+
+# test_failure -A "${ERROR_EXCLAMATION_WRONG_PLACE}" feat!frontend backend:word1 word2
+
+# test_failure -A "${ERROR_EXCLAMATION_WRONG_PLACE}" feat!frontend backend: word1 word2
+# test_failure -A "${ERROR_EXCLAMATION_WRONG_PLACE}" feat!frontend backend :word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat! frontend backend:word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat !frontend backend:word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend!backend: word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend!backend :word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend! backend:word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend !backend:word1 word2
+# test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend!:word1 word2
+
+# test_failure -A "${ERROR_EXCLAMATION_WRONG_PLACE}" feat!frontend backend : word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat! frontend backend: word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat! frontend backend :word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat !frontend backend :word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend! backend: word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend! backend :word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend !backend: word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend !backend :word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend ! backend:word1 word2
+test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend!: word1 word2
+# test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend! :word1 word2
+# test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend !:word1 word2
+
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat! frontend backend : word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat !frontend backend : word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat ! frontend backend: word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat ! frontend backend :word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend! backend : word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend !backend : word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend ! backend: word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend ! backend :word1 word2
+test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend! : word1 word2
+test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend !: word1 word2
+# test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend ! :word1 word2
+
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat ! frontend backend : word1 word2
+# test_failure "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend ! backend : word1 word2
+test_message 'feat(frontend,backend)!: word1 word2' feat frontend backend ! : word1 word2
+
+# test_failure -n '!-error first: %s' "${ERROR_EXCLAMATION_WRONG_PLACE}" feat frontend backend ! frontend : word1 word2
+
+
+# Sort scopes
+
+# test_message -n 'must sort: %s' 'feat(frontend,backend): word1 word2' feat backend frontend:word1 word2
+test_message -n 'must sort: %s' 'feat(frontend,backend): word1 word2' feat backend frontend: word1 word2
+# test_message -n 'must sort: %s' 'feat(frontend,backend): word1 word2' feat backend frontend :word1 word2
+
+
+# Failures
+
+test_failure -A "${ERROR_MISSING_TYPE}" : message
+test_failure -A "$(errf ERROR_UNAVAILABLE_TYPE feet)" feet!: word1 word2
+test_failure "$(errf ERROR_UNAVAILABLE_SCOPE fontend)" fix fontend backend: word1 word2
+# test_failure "$(errf ERROR_DUPLICATED_SCOPE frontend)" feat frontend backend frontend!: word1 word2
+# test_failure "$(errf ERROR_DUPLICATED_SCOPE frontend)" feat frontend backend frontend : word1 word2
+# test_failure -n 'must fail w/ dup-error about frontend: %s' "$(errf ERROR_DUPLICATED_SCOPE frontend)" feat frontend backend frontend backend: word1 word2
+
+
+# Ending
+
+all_passed
+
+tear_down

@@ -16,17 +16,19 @@ LINKS_NAMES += $(foreach SUFFIX, \: ! !\:, $(addsuffix $(SUFFIX), $(LINKS_NAMES)
 LINKS_BUILD_PATHS := $(addprefix $(BUILD_DIR)/, $(LINKS_NAMES))
 LINKS_INSTALL_PATHS := $(addprefix $(INSTALL_DIR)/, $(LINKS_NAMES))
 
-.PHONY: all clean \
+TEST_RUN_DIR = test/run
+
+.PHONY: all clean clean-build \
 	install uninstall \
 	install-binary uninstall-binary \
 	config unconfig \
 	install-links uninstall-links $(LINKS_INSTALL_PATHS) \
-	test
+	test clean-test
 
 all: $(BINARY_BUILD_PATH) $(LINKS_BUILD_PATHS)
 
-$(BUILD_DIR):
-	mkdir $(BUILD_DIR)
+$(BUILD_DIR) $(TEST_RUN_DIR):
+	mkdir $@
 
 $(BINARY_BUILD_PATH): $(BINARY) | $(BUILD_DIR)
 	cp $(BINARY) $(BINARY_BUILD_PATH)
@@ -34,7 +36,9 @@ $(BINARY_BUILD_PATH): $(BINARY) | $(BUILD_DIR)
 $(LINKS_BUILD_PATHS): | $(BUILD_DIR)
 	ln --symbolic $(BINARY) $@
 
-clean:
+clean: clean-build clean-test
+
+clean-build:
 	rm -rf $(BUILD_DIR)
 
 install: install-binary config install-links
@@ -64,3 +68,9 @@ uninstall-links:
 	rm $(LINKS_INSTALL_PATHS)
 
 uninstall: uninstall-binary unconfig uninstall-links
+
+test: | $(TEST_RUN_DIR)
+	test/all $(TEST_RUN_DIR) $(BUILD_DIR)
+
+clean-test:
+	rm -rf $(TEST_RUN_DIR)
