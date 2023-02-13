@@ -16,7 +16,7 @@ die() {
 
 process_scope() {
 	if [ -z "${config_scopes}" ]; then
-		config_scopes="$(git config --get convention.scopes)" || die "${ERROR_CANNOT_GET_CONFIG}"
+		config_scopes="$(git config --get conventional.scopes)" || die "${ERROR_CANNOT_GET_CONFIG}"
 		for config_scope in ${config_scopes}; do
 			eval "config_scopes_${config_scope}=1"
 		done
@@ -42,7 +42,7 @@ format_scopes() {
 }
 
 cmd_conventional_commit() {
-	config_types="$(git config --get convention.types)" || die "${ERROR_CANNOT_GET_CONFIG}"
+	config_types="$(git config --get conventional.types)" || die "${ERROR_CANNOT_GET_CONFIG}"
 	for config_type in ${config_types}; do
 		eval "config_types_${config_type}=1"
 	done

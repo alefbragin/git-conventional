@@ -70,8 +70,8 @@ set_up() {
 		cd "${REPO}" || failed 'cannot enter to repo directory'
 
 		git init || failed 'cannot init repo'
-		git_config convention.types 'feat fix'
-		git_config convention.scopes 'frontend backend'
+		git_config conventional.types 'feat fix'
+		git_config conventional.scopes 'frontend backend'
 		git_config user.email smit@example.com
 		git_config user.name Jhon Smit
 		git_config commit.gpgsign false

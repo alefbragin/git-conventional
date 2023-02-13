@@ -3,7 +3,7 @@ GIT_CONFIG_SCOPE ?= system
 TYPES ?= build chore ci docs feat fix ops perf refactor style test wip
 SCOPES ?= backend frontend
 
-CONFIG_SECTION = convention
+CONFIG_SECTION = conventional
 
 BUILD_DIR=build
 INSTALL_DIR=$(PREFIX)/bin
